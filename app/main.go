@@ -1,15 +1,40 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 )
 
-// Ensures gofmt doesn't remove the "net" and "os" imports above (feel free to remove this!)
-var _ = net.Listen
-var _ = os.Exit
+type RequestLine struct {
+	Method string
+	Target string
+	Version string
+}
+
+func parseReqLine(reqLine string) (RequestLine, error) {
+	// Split req line by spaces
+	reqParts := strings.Split(reqLine, " ")
+
+	// Check for METHOD, TARGET, VERSION
+	if len(reqParts) < 3 {
+		return RequestLine{}, errors.New("malformed request line")
+	}
+
+	parsedLine := RequestLine{Method: reqParts[0], Target: reqParts[1], Version: reqParts[2]}
+
+	return parsedLine, nil
+}
+
+type HTTPRequest struct {
+	RequestLine RequestLine
+
+
+}
+
+
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -45,22 +70,24 @@ func main() {
 	lines := strings.Split(reqString, "\r\n")
 	reqLine := lines[0]
 
-	// Split req line by spaces
-	reqParts := strings.Split(reqLine, " ")
-
-	// Check for METHOD, TARGET, VERSION
-	if len(reqParts) < 3 {
-		fmt.Println("Malformed request line")
-		return
+	parsedReq, err := parseReqLine(reqLine)
+	if err != nil {
+		fmt.Println("Error: ", err)
 	}
-
-	// Should return str([]bytes) representing path
-	target := reqParts[1]
-
+	
 	response := "HTTP/1.1 404 Not Found\r\n\r\n"
 
-	if target == "/" {
+	switch {
+	case parsedReq.Target == "/":
 		response = "HTTP/1.1 200 OK\r\n\r\n"
+	case parsedReq.Target == "/user-agent":
+
+	case strings.HasPrefix(parsedReq.Target, "/echo/"):
+		responseHeader := "HTTP/1.1 200 OK"
+		contentType := "Content-Type: text/plain"
+		body := parsedReq.Target[6:]
+		contentLength := fmt.Sprintf("Content-Length: %d", len(body))
+		response = fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", responseHeader, contentType, contentLength, body)
 	}
 
 	_, err = conn.Write([]byte(response))
