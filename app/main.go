@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,31 +32,36 @@ func parseReqLine(reqLine string) (RequestLine, error) {
 	}, nil
 }
 
-type HTTPRequest struct {
-	RequestLine RequestLine
-
-
-}
-
-
-
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
+	// Parse command line at start
+	directory := ""
+	if len(os.Args) == 3 && os.Args[1] == "--directory" {
+		directory = os.Args[2]
+	}
 
-	
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
 		fmt.Println("Failed to bind to port 4221")
 		os.Exit(1)
 	}
 	defer l.Close()
-	
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
+
+	fmt.Println("Server is listening on port 4221")
+
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			continue
+		}
+
+		// Run handleRequest concurrently
+		go handleRequest(conn, directory)
 	}
+	
+}
+
+func handleRequest(conn net.Conn, directory string) {
 	defer conn.Close()
 
 	// Buffer to hold incoming data
@@ -102,7 +108,7 @@ func main() {
 				headerName := strings.ToLower(strings.TrimSpace(parts[0]))
 				// Find User-Agent field
 				// Header names are case-insensitive, force lower
-				if headerName == "user-agent:" {
+				if headerName == "user-agent" {
 					// Grab entire second part, can include spaces
 					body = strings.TrimSpace(parts[1])
 					break
@@ -118,6 +124,35 @@ func main() {
 		body := parsedReq.Target[6:]
 		contentLength := fmt.Sprintf("Content-Length: %d", len(body))
 		response = fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", responseHeader, contentType, contentLength, body)
+	case strings.HasPrefix(parsedReq.Target, "/files/"):
+		// Need to return a file from the server
+
+		// directory will be empty if Args don't match our needs
+		if directory == "" {
+			break
+		}
+
+		// Get directory with server files and combine with HTTP request
+		file := parsedReq.Target[7:]
+
+		// Combine into a full filepath
+		fp := filepath.Join(directory, file)
+
+		// Read the file, if not found return 404 NOT FOUND
+		data, err := os.ReadFile(fp)
+		if err != nil {
+			fmt.Println("Error reading the file: ", err)
+			// response 404 Not Found by default so just break out of switch
+			break
+		}
+
+		
+		responseHeader := "HTTP/1.1 200 OK"
+		contentType := "Content-Type: application/octet-stream"
+		contentLength := fmt.Sprintf("Content-Length: %d", len(data))
+
+
+		response = fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", responseHeader, contentType, contentLength, string(data))
 	}
 
 	_, err = conn.Write([]byte(response))
@@ -125,5 +160,4 @@ func main() {
 		fmt.Println("Error writing response: ", err)
 		os.Exit(1)
 	}
-	
 }
