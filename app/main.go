@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -125,34 +126,87 @@ func handleRequest(conn net.Conn, directory string) {
 		contentLength := fmt.Sprintf("Content-Length: %d", len(body))
 		response = fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", responseHeader, contentType, contentLength, body)
 	case strings.HasPrefix(parsedReq.Target, "/files/"):
-		// Need to return a file from the server
-
 		// directory will be empty if Args don't match our needs
 		if directory == "" {
 			break
 		}
+		if parsedReq.Method == "GET" {
+			// Need to return a file from the server
+			// Get directory with server files and combine with HTTP request
+			file := parsedReq.Target[7:]
 
-		// Get directory with server files and combine with HTTP request
-		file := parsedReq.Target[7:]
+			// Combine into a full filepath
+			fp := filepath.Join(directory, file)
 
-		// Combine into a full filepath
-		fp := filepath.Join(directory, file)
+			// Read the file, if not found return 404 NOT FOUND
+			data, err := os.ReadFile(fp)
+			if err != nil {
+				fmt.Println("Error reading the file: ", err)
+				// response 404 Not Found by default so just break out of switch
+				break
+			}
 
-		// Read the file, if not found return 404 NOT FOUND
-		data, err := os.ReadFile(fp)
-		if err != nil {
-			fmt.Println("Error reading the file: ", err)
-			// response 404 Not Found by default so just break out of switch
-			break
+			
+			responseHeader := "HTTP/1.1 200 OK"
+			contentType := "Content-Type: application/octet-stream"
+			contentLength := fmt.Sprintf("Content-Length: %d", len(data))
+
+
+			response = fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", responseHeader, contentType, contentLength, string(data))
+		} else if parsedReq.Method == "POST" {
+			// Extract name from target
+			fname := parsedReq.Target[7:]
+
+			// Create path to new file from --directory and fname
+			fpath := filepath.Join(directory, fname)
+
+			contentLen := 0
+			var body string
+			// Loop through lines until get to body
+			for _, line := range lines {
+				if line == "" {
+					break // Stop parsing when hit empty line
+				}
+
+				if strings.HasPrefix(strings.ToLower(line), "content-length:") {
+					parts := strings.SplitN(line, ":", 2)
+					// If header is proper
+					if len(parts) == 2 {
+						contentLen, err = strconv.Atoi(strings.TrimSpace(parts[1]))
+						if err != nil {
+							fmt.Println("Content-Length did not have a proper value")
+							break
+						}
+						
+					}
+					
+				}
+			}
+
+			if contentLen == 0 {
+				fmt.Println("No content to write to file")
+				response = "HTTP/1.1 400 Bad Request\r\n\r\n"
+				break
+			}
+
+			// Extract body from original raw string
+			bodyIdx := strings.Index(reqString, "\r\n\r\n")
+			if bodyIdx == -1 {
+				fmt.Println("Malformed request: no body found")
+				break
+			}
+			// Everything after bodyIdx (+4 for \r\n\r\n) to end should be the body
+			body = reqString[bodyIdx+4:]
+
+			// Create file, pass in body of request
+			err := os.WriteFile(fpath, []byte(body), 0644)
+			if err != nil {
+				fmt.Println("Error writing file")
+				break
+			}
+
+			response = "HTTP/1.1 201 Created\r\n\r\n"
 		}
-
-		
-		responseHeader := "HTTP/1.1 200 OK"
-		contentType := "Content-Type: application/octet-stream"
-		contentLength := fmt.Sprintf("Content-Length: %d", len(data))
-
-
-		response = fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", responseHeader, contentType, contentLength, string(data))
 	}
 
 	_, err = conn.Write([]byte(response))
